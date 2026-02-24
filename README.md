@@ -128,8 +128,8 @@ PYTHONPATH=. python eval/eval_reasonvos.py
 ### GroundMoRe
 ```bash
 # Step1: Preprocess
-PYTHONPATH=. python utils/preprocess_reasonvos.py
-PYTHONPATH=. python utils/Ovis_preprocess_query_reasonvos.py -ng 8 --split valid
+PYTHONPATH=. python utils/preprocess_groundmore.py
+PYTHONPATH=. python utils/Ovis_preprocess_query_groundmore.py -ng 8 --split valid
 
 # Step2: Inference
 PYTHONPATH=. python eval/Ovis_infer_groundmore.py -ng 8 --split valid
