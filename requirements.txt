@@ -1,0 +1,9 @@
+transformers==4.51.3
+numpy==1.25.0
+pillow==10.3.0
+moviepy==1.0.3
+pandas
+scikit-image
+matplotlib
+opencv-python
+pycocotools
