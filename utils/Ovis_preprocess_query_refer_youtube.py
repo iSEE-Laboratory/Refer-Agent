@@ -84,7 +84,7 @@ def main(args):
     for pid, results in result_dict.items():
         all_results.update(results)
 
-    json.dump(all_results, open(os.path.join(output_dir, "reasonvos_query_qa_error.json"), "w"), indent=4)
+    json.dump(all_results, open(os.path.join(output_dir, "refytb_query_qa.json"), "w"), indent=4)
 
 
 convert_query_prompt = """
