@@ -2,8 +2,8 @@
 <br>
 <h2>Refer-Agent: A Collaborative Multi-Agent System with Reasoning and Reflection for Referring Video Object Segmentation</h2>
 
-Haichao Jiang &nbsp;
-[Tianming Liang](https://tmliang.github.io/) &nbsp;
+Haichao Jiang<sup>†</sup> &nbsp;
+[Tianming Liang](https://tmliang.github.io/)<sup>†</sup> &nbsp;
 [Wei-Shi Zheng](https://www.isee-ai.cn/~zhwshi/) &nbsp;
 [Jian-Fang Hu](https://isee-ai.cn/~hujianfang/)* &nbsp;
 
