@@ -11,6 +11,8 @@ Sun Yat-sen University &nbsp;
 
 </div>
 
+<h3>CVPR 2026</h3>
+
 ## 🎯 Framework
 
 ![](assets/refer-agent.jpg)
