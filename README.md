@@ -9,9 +9,10 @@ Haichao Jiang<sup>†</sup> &nbsp;
 
 Sun Yat-sen University &nbsp;
 
+<h3>CVPR 2026</h3>
+
 </div>
 
-<h3>CVPR 2026</h3>
 
 ## 🎯 Framework
 
