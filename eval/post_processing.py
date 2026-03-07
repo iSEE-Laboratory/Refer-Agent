@@ -18,7 +18,6 @@ warnings.filterwarnings("ignore")
 from sam2.build_sam import build_sam2_video_predictor, build_sam2
 
 OUTPUT = "path/to/output"
-OVIS_CHECKPOINT = "path/to/AIDC-AI/Ovis2.5-9B"
 
 def main(args):
     print("Inference only supports for batch size = 1")
