@@ -19,7 +19,6 @@ import multiprocessing as mp
 
 NUM_WOEKERS = 32
 
-
 def eval_queue(q, rank, out_dict, mask_path, pred_path, meta_exp):
     while not q.empty():
         vid_key, vid_name, exp_id = q.get()
