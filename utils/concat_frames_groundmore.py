@@ -6,7 +6,6 @@ from tqdm import tqdm
 import shutil
 import numpy as np
 
-
 def select_uniform_images(image_dict, type='clip', start_idx=1, end_idx=-1, num_frame=10):
     all_images = list(image_dict.keys())
     if end_idx == -1:

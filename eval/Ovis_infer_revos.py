@@ -9,29 +9,27 @@ import cv2
 from transformers import AutoModelForCausalLM
 import numpy as np
 import torch
-import math
 import re
 from torch.multiprocessing import set_start_method
 import misc as utils
 import torchvision.transforms as T
 import os
 os.environ['HF_ENDPOINT'] = "https://hf-mirror.com"
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 import json
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
-import sys
+import math
 import matplotlib
 from typing import List, Dict, Any, Optional
-import gc
 import multiprocessing as mp
 import warnings
 
 warnings.filterwarnings("ignore")
 
-from utils.concat_frames_refer_youtube import select_top_images, stitch_images, simple_concat_frames
-from utils.preprocess_refer_youtube import ImageScorer
+from utils.concat_frames_revos import select_top_images, stitch_images, simple_concat_frames
+from utils.preprocess_revos import ImageScorer
 
 # colormap
 color_list = utils.colormap()
@@ -68,22 +66,18 @@ def main(args):
     os.makedirs(output_dir, exist_ok=True)
 
     # load data
-    root = 'path/to/ref-youtube-vos'
-    img_folder = os.path.join(root, 'valid', 'JPEGImages')
-    meta_file = os.path.join(root, "meta_expressions", "valid", "meta_expressions.json")
-    meta_file_test = os.path.join(root, "meta_expressions", "test", "meta_expressions.json")
+    root = 'path/to/revos'
+    img_folder = root
+    meta_file = os.path.join(root, "meta_expressions_valid_.json")
     with open(meta_file, "r") as f:
         data = json.load(f)["videos"]
-    with open(meta_file_test, "r") as f:
-        data_test = json.load(f)["videos"]
-    data = {k: v for k, v in data.items() if k not in data_test}
 
     video_list = list(data.keys())
 
     random.shuffle(video_list)
 
-    all_query_qa = json.load(open('output_query_qa/refytb_query_qa.json', 'r'))
-    all_CLIP_query_scores = json.load(open('output_concat/refytb/CLIP/video_scores_refytb.json', 'r'))
+    all_query_qa = json.load(open('output_query_qa/revos_query_qa.json', 'r'))
+    all_CLIP_query_scores = json.load(open('output_concat/revos/CLIP/video_scores_revos.json', 'r'))
 
     # create subprocess
     thread_num = args.num_gpus
@@ -146,9 +140,9 @@ You are given a query and an image that contains frames 1 to 10 of a video. Each
 
 2. Score each frame:
    - First, use the frame sequence to understand the query and identify what target object(s) in the video match the query.
-   - Then, for each individual frame, evaluate the visual quality and visibility of that target object. Important: You are scoring the target object's appearance in each frame, NOT how well the frame represents the overall event.
-   - Consider these factors: Is the target clearly visible or blurred? Is it occluded? Is it large enough and prominently featured? Frames where the target is absent should receive low scores.
-   - Rate each frame on a scale of 1 to 10. Higher scores indicate frames where the target object appears most clearly, with minimal blur, no occlusion, and prominent visibility - making it ideal for **detection and segmentation** tasks.
+   - Then, for each individual frame, evaluate the visual quality and visibility of that target object(s). Important: You are scoring the target objects' appearance in each frame, NOT how well the frame represents the overall event.
+   - Consider these factors: Are the targets clearly visible or blurred? Are them occluded? Are them large enough and prominently featured? Frames where the targets are absent should receive low scores.
+   - Rate each frame on a scale of 1 to 10. Higher scores indicate frames where the target objects appear most clearly, with minimal blur, no occlusion, and prominent visibility - making it ideal for **detection and segmentation** tasks.
 
 3. Ensure score differentiation:
    - Compare frames against each other. Frames with the best target visibility should receive significantly higher scores (9-10).
@@ -179,7 +173,7 @@ def score_frame_with_vlm(frames, query, attention_info, vl_model, pid):
     input_ids, pixel_values, grid_thws = vl_model.preprocess_inputs(
         messages=messages,
         add_generation_prompt=True,
-        enable_thinking=True,
+        enable_thinking=True
     )
     input_ids = input_ids.cuda()
     pixel_values = pixel_values.cuda().to(vl_model.dtype) if pixel_values is not None else None
@@ -218,7 +212,7 @@ def score_frame_with_vlm(frames, query, attention_info, vl_model, pid):
 
 generate_descriptions_prompt = """
 # Task:
-Analyze a spliced image to track objects temporally and generate an unique, key-frame-only visual description for target best matching a flexible query.
+Analyze a spliced image to track objects temporally and generate an unique, key-frame-only visual description for targets best matching a flexible query.
 
 # Input:
 - A spliced Image: containing {num_frame} frames. The keyframe is the largest, while the remaining frames are smaller. Each frame has a number in the upper left corner, starting from 1, indicating its frame_id in the frame sequence, which is **very important** for subsequent analysis.
@@ -228,18 +222,21 @@ Analyze a spliced image to track objects temporally and generate an unique, key-
 
 # Step-by-step processing:
 ## Step 1: Global trajectory analysis
-First, examine ALL frames to understand the full context and motion patterns. Based on the query, identify potential candidate objects and track each across the sequence. Then, determine which candidate best matches the query and note its complete trajectory.
+First, examine ALL frames to understand the full context and motion patterns. Based on the query, identify potential candidate objects and track each across the sequence. Then, determine the candidates best match the query and note their complete trajectories.
 
 ## Step 2: Key frame description
-Now focus on the specified key frame (ID: {key_frame_id}). For the target identified in Step 1, provide a unique and concise description as it appears in this frame. The description must be sufficient to uniquely identify this target within the key frame.
+Now focus on the specified key frame (ID: {key_frame_id}). For the targets identified in Step 1, provide corresponding unique and concise descriptions as them appears in this frame. Each description must be sufficient to uniquely identify the target within the key frame.
 Focus on **static features** (category, color, appearance, shape, spatial location) visible in the key frame.
-The description should be a **single, complete sentence** under 30 words. Do not mention frame numbers or phrases like 'in the key frame'.
+Each description should be a **single, complete sentence** under 30 words. Do not mention frame numbers or phrases like 'in the key frame'.
 
 ## Step 3: Refinement
-Based on **history feedback**, refine the description for uniqueness and accuracy if history is provided.
+Based on **history feedback**, refine the descriptions for uniqueness and accuracy if history is provided.
 
 # Output (JSON):
-{{"description": "Unique description for the target, limit your response to 30 words."}}
+{{
+    "target_count": the number of qualified targets,
+    "descriptions": ["desc1", "desc2", ...]
+}}
 """
 def generate_descriptions_with_vlm(frame, query, key_frame_id, num_frame, vl_model, pid, history=None):
     question = generate_descriptions_prompt.format(query=query, key_frame_id=key_frame_id, history=history, num_frame=num_frame)
@@ -259,7 +256,7 @@ def generate_descriptions_with_vlm(frame, query, key_frame_id, num_frame, vl_mod
     input_ids, pixel_values, grid_thws = vl_model.preprocess_inputs(
         messages=messages,
         add_generation_prompt=True,
-        enable_thinking=True,
+        enable_thinking=True
     )
     input_ids = input_ids.cuda()
     pixel_values = pixel_values.cuda().to(vl_model.dtype) if pixel_values is not None else None
@@ -289,10 +286,10 @@ def generate_descriptions_with_vlm(frame, query, key_frame_id, num_frame, vl_mod
 
         # Parse JSON to extract target_count and descriptions
         output_json = json.loads(response)
-        description = output_json.get("description", '')
+        descriptions = output_json.get("descriptions", [])
 
         # Ensure descriptions is a list of unique strings
-        descriptions = [description]
+        descriptions = list(set([str(desc) for desc in descriptions if desc]))
     except Exception:
         # Fallback if JSON parsing fails
         descriptions = []
@@ -311,25 +308,28 @@ Analyze spliced video frames to track objects temporally and generate an unique,
 
 # Step-by-step processing:
 ## Step 1: Global trajectory analysis
-First, examine ALL frames to understand the full context and motion patterns. Based on the query, identify potential candidate objects and track each across the sequence. Then, determine which candidate best matches the query and note its complete trajectory.
+First, examine ALL frames to understand the full context and motion patterns. Based on the query, identify potential candidate objects and track each across the sequence. Then, determine the candidates best match the query and note their complete trajectories.
 
 ## Step 2: Key frame description
-Now focus on the specified key frame (ID: {key_frame_id}). For the target identified in Step 1, provide a unique and concise description as it appears in this frame. The description must be sufficient to uniquely identify this target within the key frame.
+Now focus on the specified key frame (ID: {key_frame_id}). For the targets identified in Step 1, provide corresponding unique and concise descriptions as them appears in this frame. Each description must be sufficient to uniquely identify the target within the key frame.
 Focus on **static features** (category, color, appearance, shape, spatial location) visible in the key frame.
-The description should be a **single, complete sentence** under 30 words. Do not mention frame numbers or phrases like 'in the key frame'.
+Each description should be a **single, complete sentence** under 30 words. Do not mention frame numbers or phrases like 'in the key frame'.
 
 # Output (JSON):
-{{"description": "Unique description for the target, limit your response to 30 words."}}
+{{
+    "target_count": the number of qualified targets,
+    "descriptions": ["desc1", "desc2", ...]
+}}
 
 # Previous results and feedback
 The following is a series of reflection steps. Please synthesize all the information to give the final answer.
 """
 generate_descriptions_prompt_cot = """
 ## [Refinement Step] 
-In this round, the following shows the generated description and the feedback about the connection and difference between the description and the query '{query}':
-Description and feedback: '{update_description_cot}'
+In this round, the following shows the generated descriptions and the feedback about the connection and difference between each description and the query '{query}':
+Descriptions and feedback: '{update_descriptions_cot}'
 """
-def generate_descriptions_with_vlm_cot(frame, query, key_frame_id, update_description_cots, num_frame, vl_model, pid):
+def generate_descriptions_with_vlm_cot(frame, query, key_frame_id, update_descriptions_cots, num_frame, vl_model, pid):
     question_origin = generate_descriptions_prompt_origin.format(query=query, key_frame_id=key_frame_id, num_frame=num_frame)
     # print("🚀🚀🚀question:  ", question)
 
@@ -344,8 +344,8 @@ def generate_descriptions_with_vlm_cot(frame, query, key_frame_id, update_descri
         }
     ]
 
-    for update_description_cot in update_description_cots:
-        cur_question_cot = generate_descriptions_prompt_cot.format(query=query, update_description_cot=update_description_cot)
+    for update_descriptions_cot in update_descriptions_cots:
+        cur_question_cot = generate_descriptions_prompt_cot.format(query=query, update_descriptions_cot=update_descriptions_cot)
         cur_message = [
             {"type": "text", "text": cur_question_cot}
         ]
@@ -354,7 +354,7 @@ def generate_descriptions_with_vlm_cot(frame, query, key_frame_id, update_descri
     input_ids, pixel_values, grid_thws = vl_model.preprocess_inputs(
         messages=messages,
         add_generation_prompt=True,
-        enable_thinking=True,
+        enable_thinking=True
     )
     input_ids = input_ids.cuda()
     pixel_values = pixel_values.cuda().to(vl_model.dtype) if pixel_values is not None else None
@@ -384,15 +384,15 @@ def generate_descriptions_with_vlm_cot(frame, query, key_frame_id, update_descri
 
         # Parse JSON to extract target_count and descriptions
         output_json = json.loads(response)
-        description = output_json.get("description", '')
+        descriptions = output_json.get("descriptions", [])
 
         # Ensure descriptions is a list of unique strings
-        descriptions = [description]
+        descriptions = list(set([str(desc) for desc in descriptions if desc]))
     except Exception:
         # Fallback if JSON parsing fails
         descriptions = []
 
-    descriptions = [description.replace('-', '') for description in descriptions]
+    descriptions = [description.replace(' - ', '-') for description in descriptions]
     return descriptions
 
 grounding_prompt = """
@@ -578,6 +578,23 @@ def refine_grounding_with_vlm(frame, query, description, vl_model):
         point = points[-1]
     else:
         point = None
+
+    # box_pattern = r'<box>\s*[\(\[\{]*\s*([\d\.]+)\s*[,\s]+\s*([\d\.]+)\s*[\)\]\},\s]*\s*[\(\[\{]*\s*([\d\.]+)\s*[,\s]+\s*([\d\.]+)\s*[\)\]\}]*\s*</box>'
+    # box_matches = re.findall(box_pattern, response)
+
+    # boxes = []
+    # for match in box_matches:
+    #     try:
+    #         x1, y1, x2, y2 = [float(coord) for coord in match]
+    #         boxes.append(normalize_coordinates(x1, y1, x2, y2))
+    #     except ValueError:
+    #         continue
+
+    # boxes = remove_duplicate_boxes(boxes)
+    # if boxes:
+    #     bbox = boxes[-1]
+    # else:
+    #     bbox = None
     return point
 
 def normalize_point_coordinates(x, y):
@@ -673,7 +690,7 @@ def image_qa_with_vlm(frames, query, questions, key_frame_id, vl_model):
     input_ids, pixel_values, grid_thws = vl_model.preprocess_inputs(
         messages=messages,
         add_generation_prompt=True,
-        enable_thinking=True,
+        enable_thinking=True
     )
     input_ids = input_ids.cuda()
     pixel_values = pixel_values.cuda().to(vl_model.dtype) if pixel_values is not None else None
@@ -828,7 +845,7 @@ def answer_qa_with_vlm(frame, questions, addition_info, vl_model):
     input_ids, pixel_values, grid_thws = vl_model.preprocess_inputs(
         messages=messages,
         add_generation_prompt=True,
-        enable_thinking=True,
+        enable_thinking=True
     )
     input_ids = input_ids.cuda()
     pixel_values = pixel_values.cuda().to(vl_model.dtype) if pixel_values is not None else None
@@ -1164,7 +1181,7 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
             # read all the anno meta for assigned expressions only
             for exp_id in expressions:
                 meta = {}
-                meta["exp"] = expressions[exp_id]['exp']
+                meta["exp"] = expressions[exp_id]["exp"]
                 meta["exp_id"] = exp_id
                 meta["frames"] = frames
                 metas.append(meta)
@@ -1190,6 +1207,8 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
                 exp_id = meta[i]["exp_id"]
 
                 save_path = os.path.join(save_path_prefix, video_name, exp_id)
+                # if os.path.exists(save_path):
+                #     continue
 
                 start_frame_idx = 1
                 end_frame_idx = video_len
@@ -1244,7 +1263,7 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
 
                         scored_items = []
                         for idx, selected_frame in enumerate(selected_frames):
-                            cur_score = CLIP_scores[selected_frame]['weighted_score'] + 0.7 * Ovis_scores[idx]
+                            cur_score = 0.0 * CLIP_scores[selected_frame]['weighted_score'] + 0.7 * Ovis_scores[idx]
                             scored_items.append({
                                 'original_idx': idx,
                                 'score': cur_score
@@ -1318,9 +1337,6 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
                                         continue
 
                                     converted_box = convert_bbox(grounding_bbox, orig_height, orig_width)
-                                    # image_predictor.set_image(original_key_frame)
-                                    # input_box = np.array(converted_box)
-                                    # masks, _, _ = image_predictor.predict(box=input_box)
                                     labeled_key_frame = visualize_box(bytes_imgs[key_frame_idx], converted_box)
                                     grounding_point = refine_grounding_with_vlm(labeled_key_frame, exp, description, ovis_model)
 
@@ -1409,7 +1425,6 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
                                     descriptions = generate_descriptions_with_vlm(combined_image, exp, key_frame_id + 1, len(selected_frame_list), ovis_model, pid)
                                 else:
                                     descriptions = generate_descriptions_with_vlm_cot(combined_image, exp, key_frame_id + 1, update_descriptions_cots, len(selected_frame_list), ovis_model, pid)
-                                # descriptions = generate_descriptions_with_vlm(combined_image, exp, key_frame_id + 1, ovis_model, update_descriptions_info)
 
                         grounding_bboxes = []
                         grounding_points = []

@@ -9,29 +9,27 @@ import cv2
 from transformers import AutoModelForCausalLM
 import numpy as np
 import torch
-import math
 import re
 from torch.multiprocessing import set_start_method
 import misc as utils
 import torchvision.transforms as T
 import os
 os.environ['HF_ENDPOINT'] = "https://hf-mirror.com"
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 import json
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
-import sys
+import math
 import matplotlib
 from typing import List, Dict, Any, Optional
-import gc
 import multiprocessing as mp
 import warnings
 
 warnings.filterwarnings("ignore")
 
-from utils.concat_frames_refer_youtube import select_top_images, stitch_images, simple_concat_frames
-from utils.preprocess_refer_youtube import ImageScorer
+from utils.concat_frames_groundmore import select_top_images, stitch_images, simple_concat_frames
+from utils.preprocess_groundmore import ImageScorer
 
 # colormap
 color_list = utils.colormap()
@@ -68,22 +66,18 @@ def main(args):
     os.makedirs(output_dir, exist_ok=True)
 
     # load data
-    root = 'path/to/ref-youtube-vos'
-    img_folder = os.path.join(root, 'valid', 'JPEGImages')
-    meta_file = os.path.join(root, "meta_expressions", "valid", "meta_expressions.json")
-    meta_file_test = os.path.join(root, "meta_expressions", "test", "meta_expressions.json")
+    root = 'path/to/GroundMoRe'
+    img_folder = os.path.join(root, 'annotations')
+    meta_file = os.path.join(root, "test_v2.json")
     with open(meta_file, "r") as f:
         data = json.load(f)["videos"]
-    with open(meta_file_test, "r") as f:
-        data_test = json.load(f)["videos"]
-    data = {k: v for k, v in data.items() if k not in data_test}
 
     video_list = list(data.keys())
 
     random.shuffle(video_list)
 
-    all_query_qa = json.load(open('output_query_qa/refytb_query_qa.json', 'r'))
-    all_CLIP_query_scores = json.load(open('output_concat/refytb/CLIP/video_scores_refytb.json', 'r'))
+    all_query_qa = json.load(open('output_query_qa/groundmore_query_qa.json', 'r'))
+    all_CLIP_query_scores = json.load(open('output_concat/groundmore/CLIP/video_scores_groundmore.json', 'r'))
 
     # create subprocess
     thread_num = args.num_gpus
@@ -94,6 +88,7 @@ def main(args):
 
     video_num = len(video_list)
     per_thread_video_num = math.ceil(float(video_num) / float(thread_num))
+    # per_thread_video_num = video_num // thread_num
 
     print('Start inference')
     for i in range(thread_num):
@@ -179,7 +174,7 @@ def score_frame_with_vlm(frames, query, attention_info, vl_model, pid):
     input_ids, pixel_values, grid_thws = vl_model.preprocess_inputs(
         messages=messages,
         add_generation_prompt=True,
-        enable_thinking=True,
+        enable_thinking=True
     )
     input_ids = input_ids.cuda()
     pixel_values = pixel_values.cuda().to(vl_model.dtype) if pixel_values is not None else None
@@ -259,7 +254,7 @@ def generate_descriptions_with_vlm(frame, query, key_frame_id, num_frame, vl_mod
     input_ids, pixel_values, grid_thws = vl_model.preprocess_inputs(
         messages=messages,
         add_generation_prompt=True,
-        enable_thinking=True,
+        enable_thinking=True
     )
     input_ids = input_ids.cuda()
     pixel_values = pixel_values.cuda().to(vl_model.dtype) if pixel_values is not None else None
@@ -354,7 +349,7 @@ def generate_descriptions_with_vlm_cot(frame, query, key_frame_id, update_descri
     input_ids, pixel_values, grid_thws = vl_model.preprocess_inputs(
         messages=messages,
         add_generation_prompt=True,
-        enable_thinking=True,
+        enable_thinking=True
     )
     input_ids = input_ids.cuda()
     pixel_values = pixel_values.cuda().to(vl_model.dtype) if pixel_values is not None else None
@@ -578,6 +573,23 @@ def refine_grounding_with_vlm(frame, query, description, vl_model):
         point = points[-1]
     else:
         point = None
+
+    # box_pattern = r'<box>\s*[\(\[\{]*\s*([\d\.]+)\s*[,\s]+\s*([\d\.]+)\s*[\)\]\},\s]*\s*[\(\[\{]*\s*([\d\.]+)\s*[,\s]+\s*([\d\.]+)\s*[\)\]\}]*\s*</box>'
+    # box_matches = re.findall(box_pattern, response)
+
+    # boxes = []
+    # for match in box_matches:
+    #     try:
+    #         x1, y1, x2, y2 = [float(coord) for coord in match]
+    #         boxes.append(normalize_coordinates(x1, y1, x2, y2))
+    #     except ValueError:
+    #         continue
+
+    # boxes = remove_duplicate_boxes(boxes)
+    # if boxes:
+    #     bbox = boxes[-1]
+    # else:
+    #     bbox = None
     return point
 
 def normalize_point_coordinates(x, y):
@@ -673,7 +685,7 @@ def image_qa_with_vlm(frames, query, questions, key_frame_id, vl_model):
     input_ids, pixel_values, grid_thws = vl_model.preprocess_inputs(
         messages=messages,
         add_generation_prompt=True,
-        enable_thinking=True,
+        enable_thinking=True
     )
     input_ids = input_ids.cuda()
     pixel_values = pixel_values.cuda().to(vl_model.dtype) if pixel_values is not None else None
@@ -828,7 +840,7 @@ def answer_qa_with_vlm(frame, questions, addition_info, vl_model):
     input_ids, pixel_values, grid_thws = vl_model.preprocess_inputs(
         messages=messages,
         add_generation_prompt=True,
-        enable_thinking=True,
+        enable_thinking=True
     )
     input_ids = input_ids.cuda()
     pixel_values = pixel_values.cuda().to(vl_model.dtype) if pixel_values is not None else None
@@ -1154,8 +1166,9 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
         torch.cuda.empty_cache()
         metas = []  # list[dict], length is number of expressions
 
-        expressions = data[video]["expressions"]
+        expressions = data[video]["questions"]
         num_expressions = len(expressions)
+        data[video]["frames"] = sorted([img_name.split('.')[0] for img_name in os.listdir(os.path.join(img_folder, video, 'images')) if img_name.endswith('.jpg')])
         video_len = len(data[video]["frames"])
 
         split_frames_list = [data[video]["frames"]]
@@ -1164,7 +1177,7 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
             # read all the anno meta for assigned expressions only
             for exp_id in expressions:
                 meta = {}
-                meta["exp"] = expressions[exp_id]['exp']
+                meta["exp"] = expressions[exp_id]["question"]
                 meta["exp_id"] = exp_id
                 meta["frames"] = frames
                 metas.append(meta)
@@ -1179,7 +1192,7 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
             bytes_imgs = []
             for t in range(video_len):
                 frame = frames[t]
-                img_path = os.path.join(img_folder, video_name, frame + ".jpg")
+                img_path = os.path.join(img_folder, video_name, 'images', frame + ".jpg")
                 src_img = Image.open(img_path).convert('RGB')
                 src_imgs.append(src_img)
                 bytes_imgs.append(np.asarray(src_img))
@@ -1190,6 +1203,8 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
                 exp_id = meta[i]["exp_id"]
 
                 save_path = os.path.join(save_path_prefix, video_name, exp_id)
+                # if os.path.exists(save_path):
+                #     continue
 
                 start_frame_idx = 1
                 end_frame_idx = video_len
@@ -1215,7 +1230,7 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
                         if all_descriptions:
                             CLIP_descriptions_scores = {}
                             for frame_name in CLIP_scores:
-                                frame_path = os.path.join(img_folder, video_name, frame_name)
+                                frame_path = os.path.join(img_folder, video_name, 'images', frame_name)
                                 CLIP_descriptions_score = 0
                                 for description in all_descriptions:
                                     cur_score = scorer.calculate_clip_score(frame_path, description)
@@ -1244,7 +1259,7 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
 
                         scored_items = []
                         for idx, selected_frame in enumerate(selected_frames):
-                            cur_score = CLIP_scores[selected_frame]['weighted_score'] + 0.7 * Ovis_scores[idx]
+                            cur_score = 0.0 * CLIP_scores[selected_frame]['weighted_score'] + 0.7 * Ovis_scores[idx]
                             scored_items.append({
                                 'original_idx': idx,
                                 'score': cur_score
@@ -1278,9 +1293,9 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
                             left_pad_idx = (selected_frames_ids[0] + selected_frames_ids[1] + 1) // 2
                             right_pad_idx = (selected_frames_ids[1] + selected_frames_ids[2] + 1) // 2
                             left_pad_frame = Image.open(
-                                os.path.join(img_folder, video_name, frames[left_pad_idx] + '.jpg')).convert('RGB')
+                                os.path.join(img_folder, video_name, 'images', frames[left_pad_idx] + '.jpg')).convert('RGB')
                             right_pad_frame = Image.open(
-                                os.path.join(img_folder, video_name, frames[right_pad_idx] + '.jpg')).convert('RGB')
+                                os.path.join(img_folder, video_name, 'images', frames[right_pad_idx] + '.jpg')).convert('RGB')
                             selected_frame_list.insert(1, left_pad_frame)
                             selected_frame_list.insert(3, right_pad_frame)
                             key_frame_id += 1
@@ -1290,9 +1305,9 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
                             left_pad_idx = (selected_frames_ids[2] + selected_frames_ids[3] + 1) // 2
                             right_pad_idx = (selected_frames_ids[3] + selected_frames_ids[4] + 1) // 2
                             left_pad_frame = Image.open(
-                                os.path.join(img_folder, video_name, frames[left_pad_idx] + '.jpg')).convert('RGB')
+                                os.path.join(img_folder, video_name, 'images', frames[left_pad_idx] + '.jpg')).convert('RGB')
                             right_pad_frame = Image.open(
-                                os.path.join(img_folder, video_name, frames[right_pad_idx] + '.jpg')).convert('RGB')
+                                os.path.join(img_folder, video_name, 'images', frames[right_pad_idx] + '.jpg')).convert('RGB')
                             selected_frame_list.insert(3, left_pad_frame)
                             selected_frame_list.insert(5, right_pad_frame)
                             key_frame_id += 1
@@ -1318,9 +1333,6 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
                                         continue
 
                                     converted_box = convert_bbox(grounding_bbox, orig_height, orig_width)
-                                    # image_predictor.set_image(original_key_frame)
-                                    # input_box = np.array(converted_box)
-                                    # masks, _, _ = image_predictor.predict(box=input_box)
                                     labeled_key_frame = visualize_box(bytes_imgs[key_frame_idx], converted_box)
                                     grounding_point = refine_grounding_with_vlm(labeled_key_frame, exp, description, ovis_model)
 
@@ -1409,7 +1421,6 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
                                     descriptions = generate_descriptions_with_vlm(combined_image, exp, key_frame_id + 1, len(selected_frame_list), ovis_model, pid)
                                 else:
                                     descriptions = generate_descriptions_with_vlm_cot(combined_image, exp, key_frame_id + 1, update_descriptions_cots, len(selected_frame_list), ovis_model, pid)
-                                # descriptions = generate_descriptions_with_vlm(combined_image, exp, key_frame_id + 1, ovis_model, update_descriptions_info)
 
                         grounding_bboxes = []
                         grounding_points = []

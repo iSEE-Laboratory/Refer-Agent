@@ -9,14 +9,13 @@ import cv2
 from transformers import AutoModelForCausalLM
 import numpy as np
 import torch
-import math
 import re
 from torch.multiprocessing import set_start_method
 import misc as utils
 import torchvision.transforms as T
 import os
 os.environ['HF_ENDPOINT'] = "https://hf-mirror.com"
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 import json
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -24,14 +23,13 @@ from matplotlib.patches import Circle
 import sys
 import matplotlib
 from typing import List, Dict, Any, Optional
-import gc
 import multiprocessing as mp
 import warnings
 
 warnings.filterwarnings("ignore")
 
-from utils.concat_frames_refer_youtube import select_top_images, stitch_images, simple_concat_frames
-from utils.preprocess_refer_youtube import ImageScorer
+from utils.concat_frames_reasonvos import select_top_images, stitch_images, simple_concat_frames
+from utils.preprocess_reasonvos import ImageScorer
 
 # colormap
 color_list = utils.colormap()
@@ -68,22 +66,18 @@ def main(args):
     os.makedirs(output_dir, exist_ok=True)
 
     # load data
-    root = 'path/to/ref-youtube-vos'
-    img_folder = os.path.join(root, 'valid', 'JPEGImages')
-    meta_file = os.path.join(root, "meta_expressions", "valid", "meta_expressions.json")
-    meta_file_test = os.path.join(root, "meta_expressions", "test", "meta_expressions.json")
+    root = 'path/to/ReasonVOS'
+    img_folder = os.path.join(root, 'JPEGImages')
+    meta_file = os.path.join(root, "meta_expressions.json")
     with open(meta_file, "r") as f:
         data = json.load(f)["videos"]
-    with open(meta_file_test, "r") as f:
-        data_test = json.load(f)["videos"]
-    data = {k: v for k, v in data.items() if k not in data_test}
 
     video_list = list(data.keys())
 
     random.shuffle(video_list)
 
-    all_query_qa = json.load(open('output_query_qa/refytb_query_qa.json', 'r'))
-    all_CLIP_query_scores = json.load(open('output_concat/refytb/CLIP/video_scores_refytb.json', 'r'))
+    all_query_qa = json.load(open('output_query_qa/reasonvos_query_qa.json', 'r'))
+    all_CLIP_query_scores = json.load(open('output_concat/reasonvos/CLIP/video_scores_reasonvos.json', 'r'))
 
     # create subprocess
     thread_num = args.num_gpus
@@ -93,7 +87,8 @@ def main(args):
     lock = mp.Lock()
 
     video_num = len(video_list)
-    per_thread_video_num = math.ceil(float(video_num) / float(thread_num))
+    # per_thread_video_num = math.ceil(float(video_num) / float(thread_num))
+    per_thread_video_num = video_num // thread_num
 
     print('Start inference')
     for i in range(thread_num):
@@ -179,7 +174,7 @@ def score_frame_with_vlm(frames, query, attention_info, vl_model, pid):
     input_ids, pixel_values, grid_thws = vl_model.preprocess_inputs(
         messages=messages,
         add_generation_prompt=True,
-        enable_thinking=True,
+        enable_thinking=True
     )
     input_ids = input_ids.cuda()
     pixel_values = pixel_values.cuda().to(vl_model.dtype) if pixel_values is not None else None
@@ -259,7 +254,7 @@ def generate_descriptions_with_vlm(frame, query, key_frame_id, num_frame, vl_mod
     input_ids, pixel_values, grid_thws = vl_model.preprocess_inputs(
         messages=messages,
         add_generation_prompt=True,
-        enable_thinking=True,
+        enable_thinking=True
     )
     input_ids = input_ids.cuda()
     pixel_values = pixel_values.cuda().to(vl_model.dtype) if pixel_values is not None else None
@@ -354,7 +349,7 @@ def generate_descriptions_with_vlm_cot(frame, query, key_frame_id, update_descri
     input_ids, pixel_values, grid_thws = vl_model.preprocess_inputs(
         messages=messages,
         add_generation_prompt=True,
-        enable_thinking=True,
+        enable_thinking=True
     )
     input_ids = input_ids.cuda()
     pixel_values = pixel_values.cuda().to(vl_model.dtype) if pixel_values is not None else None
@@ -578,6 +573,23 @@ def refine_grounding_with_vlm(frame, query, description, vl_model):
         point = points[-1]
     else:
         point = None
+
+    # box_pattern = r'<box>\s*[\(\[\{]*\s*([\d\.]+)\s*[,\s]+\s*([\d\.]+)\s*[\)\]\},\s]*\s*[\(\[\{]*\s*([\d\.]+)\s*[,\s]+\s*([\d\.]+)\s*[\)\]\}]*\s*</box>'
+    # box_matches = re.findall(box_pattern, response)
+
+    # boxes = []
+    # for match in box_matches:
+    #     try:
+    #         x1, y1, x2, y2 = [float(coord) for coord in match]
+    #         boxes.append(normalize_coordinates(x1, y1, x2, y2))
+    #     except ValueError:
+    #         continue
+
+    # boxes = remove_duplicate_boxes(boxes)
+    # if boxes:
+    #     bbox = boxes[-1]
+    # else:
+    #     bbox = None
     return point
 
 def normalize_point_coordinates(x, y):
@@ -673,7 +685,7 @@ def image_qa_with_vlm(frames, query, questions, key_frame_id, vl_model):
     input_ids, pixel_values, grid_thws = vl_model.preprocess_inputs(
         messages=messages,
         add_generation_prompt=True,
-        enable_thinking=True,
+        enable_thinking=True
     )
     input_ids = input_ids.cuda()
     pixel_values = pixel_values.cuda().to(vl_model.dtype) if pixel_values is not None else None
@@ -828,7 +840,7 @@ def answer_qa_with_vlm(frame, questions, addition_info, vl_model):
     input_ids, pixel_values, grid_thws = vl_model.preprocess_inputs(
         messages=messages,
         add_generation_prompt=True,
-        enable_thinking=True,
+        enable_thinking=True
     )
     input_ids = input_ids.cuda()
     pixel_values = pixel_values.cuda().to(vl_model.dtype) if pixel_values is not None else None
@@ -1162,10 +1174,10 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
 
         for split_frames_idx, frames in enumerate(split_frames_list):
             # read all the anno meta for assigned expressions only
-            for exp_id in expressions:
+            for i in range(num_expressions):
                 meta = {}
-                meta["exp"] = expressions[exp_id]['exp']
-                meta["exp_id"] = exp_id
+                meta["exp"] = expressions[i]["exp_text"]
+                meta["exp_id"] = str(expressions[i]['exp_id'])
                 meta["frames"] = frames
                 metas.append(meta)
             meta = metas
@@ -1190,6 +1202,8 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
                 exp_id = meta[i]["exp_id"]
 
                 save_path = os.path.join(save_path_prefix, video_name, exp_id)
+                # if os.path.exists(save_path):
+                #     continue
 
                 start_frame_idx = 1
                 end_frame_idx = video_len
@@ -1244,7 +1258,7 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
 
                         scored_items = []
                         for idx, selected_frame in enumerate(selected_frames):
-                            cur_score = CLIP_scores[selected_frame]['weighted_score'] + 0.7 * Ovis_scores[idx]
+                            cur_score = 0.0 * CLIP_scores[selected_frame]['weighted_score'] + 0.7 * Ovis_scores[idx]
                             scored_items.append({
                                 'original_idx': idx,
                                 'score': cur_score
@@ -1318,9 +1332,6 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
                                         continue
 
                                     converted_box = convert_bbox(grounding_bbox, orig_height, orig_width)
-                                    # image_predictor.set_image(original_key_frame)
-                                    # input_box = np.array(converted_box)
-                                    # masks, _, _ = image_predictor.predict(box=input_box)
                                     labeled_key_frame = visualize_box(bytes_imgs[key_frame_idx], converted_box)
                                     grounding_point = refine_grounding_with_vlm(labeled_key_frame, exp, description, ovis_model)
 
@@ -1409,7 +1420,6 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
                                     descriptions = generate_descriptions_with_vlm(combined_image, exp, key_frame_id + 1, len(selected_frame_list), ovis_model, pid)
                                 else:
                                     descriptions = generate_descriptions_with_vlm_cot(combined_image, exp, key_frame_id + 1, update_descriptions_cots, len(selected_frame_list), ovis_model, pid)
-                                # descriptions = generate_descriptions_with_vlm(combined_image, exp, key_frame_id + 1, ovis_model, update_descriptions_info)
 
                         grounding_bboxes = []
                         grounding_points = []
@@ -1444,7 +1454,20 @@ def sub_processor(lock, pid, args, data, save_path_prefix, img_folder, video_lis
                             # QA extraction
                             video_exp = video + '/' + str(exp_id)
 
-                            addition_info = ''
+                            period_count = exp.count('.') + exp.count('?')
+                            if period_count <= 1:
+                                addition_info = ''
+                            else:
+                                periods = [i for i, char in enumerate(exp) if char == '.']
+                                if len(periods) >= 2:
+                                    addition_info = exp[:periods[-2]].strip()
+                                else:
+                                    first_period_index = exp.find('.')
+
+                                    if first_period_index != -1:
+                                        addition_info = exp[:first_period_index].strip()
+                                    else:
+                                        addition_info = ''
 
                             query_qa_static = all_query_qa[video_exp].get('static', [])
                             questions_static = convert_qa_for_answer_prompt(query_qa_static)

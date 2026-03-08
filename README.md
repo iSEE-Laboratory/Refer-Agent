@@ -88,6 +88,7 @@ PYTHONPATH=. python utils/Ovis_preprocess_query_refer_youtube.py -ng 8 --split v
 
 # Step2: Inference
 PYTHONPATH=. python eval/Ovis_infer_refytb.py -ng 8 --split valid
+PYTHONPATH=. python eval/post_processing.py --all_results_path path/to/all_results.json
 ```
 Submit your result to the online evaluation [server](https://codalab.lisn.upsaclay.fr/competitions/3282#participate-submit_results).
 
@@ -99,6 +100,7 @@ PYTHONPATH=. python utils/Ovis_preprocess_query_mevis.py -ng 8 --split valid
 
 # Step2: Inference
 PYTHONPATH=. python eval/Ovis_infer_mevis.py -ng 8 --split valid
+PYTHONPATH=. python eval/post_processing.py --all_results_path path/to/all_results.json
 ```
 Submit your result to the online evaluation [server](https://www.codabench.org/competitions/12222/).
 
@@ -110,22 +112,25 @@ PYTHONPATH=. python utils/Ovis_preprocess_query_revos.py -ng 8 --split valid
 
 # Step2: Inference
 PYTHONPATH=. python eval/Ovis_infer_revos.py -ng 8 --split valid
+PYTHONPATH=. python eval/post_processing.py --all_results_path path/to/all_results.json
 
 # Step3: Evaluation
-PYTHONPATH=. python eval/eval_revos.py
+PYTHONPATH=. python eval/eval_revos.py --pred_path "path/to/output"
 ```
 
 ### ReasonVOS
 ```bash
 # Step1: Preprocess
+PYTHONPATH=. python utils/reorder_reasonvos_meta.py
 PYTHONPATH=. python utils/preprocess_reasonvos.py
 PYTHONPATH=. python utils/Ovis_preprocess_query_reasonvos.py -ng 8 --split valid
 
 # Step2: Inference
 PYTHONPATH=. python eval/Ovis_infer_reasonvos.py -ng 8 --split valid
+PYTHONPATH=. python eval/post_processing.py --all_results_path "path/to/all_results.json"
 
 # Step3: Evaluation
-PYTHONPATH=. python eval/eval_reasonvos.py
+PYTHONPATH=. python eval/eval_reasonvos.py --pred_path "path/to/output"
 ```
 
 ### GroundMoRe
@@ -136,9 +141,10 @@ PYTHONPATH=. python utils/Ovis_preprocess_query_groundmore.py -ng 8 --split vali
 
 # Step2: Inference
 PYTHONPATH=. python eval/Ovis_infer_groundmore.py -ng 8 --split valid
+PYTHONPATH=. python eval/post_processing_groundmore.py --all_results_path path/to/all_results.json
 
 # Step3: Evaluation
-PYTHONPATH=. python eval/eval_groundmore.py
+PYTHONPATH=. python GroundMoRe/evaluate_groundmore.py
 ```
 
 ## 🙏 Acknowledgements
