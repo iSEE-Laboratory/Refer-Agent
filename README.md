@@ -10,6 +10,9 @@ Haichao Jiang<sup>†</sup> &nbsp;
 Sun Yat-sen University &nbsp;
 
 <h3>CVPR 2026</h3>
+<h3 align="center">
+  <a href="https://arxiv.org/abs/2602.03595" target='_blank'>Paper
+</h3>
 
 </div>
 
